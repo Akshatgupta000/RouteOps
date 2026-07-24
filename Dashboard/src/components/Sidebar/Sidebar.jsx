@@ -1,4 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import Card from '../UI/Card'
 import Button from '../UI/Button'
 import CalendarPicker from '../UI/CalendarPicker'
@@ -7,10 +8,9 @@ import { formatDuration, formatKm } from '../../utils/format'
 import AddCenterModal from '../Forms/AddCenterModal'
 import EditCenterModal from '../Forms/EditCenterModal'
 import Modal from '../UI/Modal'
-import { useState, useRef, useEffect } from 'react'
-import * as api from '../../services/api'
-import { LogOut, Sun, Moon, LayoutGrid, ClipboardList, Truck, Route, Trash2, Pencil } from 'lucide-react'
+import { LogOut, Sun, Moon, LayoutGrid, ClipboardList, Truck, Route, Trash2, Pencil, Bell } from 'lucide-react'
 import avatar from '../../assets/avatar.png'
+import AlertsPanel from '../UI/AlertsPanel'
 
 const linkClass = ({ isActive }) =>
   `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
@@ -26,6 +26,7 @@ export default function Sidebar({ onClose }) {
     theme,
     centers,
     orders,
+    vehicles,
     selectedCenterId,
     setSelectedCenterId,
     selectedDate,
@@ -47,6 +48,19 @@ export default function Sidebar({ onClose }) {
   const [addCenterOpen, setAddCenterOpen] = useState(false)
   const [editingCenter, setEditingCenter] = useState(null)
   const [deleteConfirmCenter, setDeleteConfirmCenter] = useState(null)
+  const [alertsOpen, setAlertsOpen] = useState(false)
+
+  const alertsCount = useMemo(() => {
+    let count = 0
+    count += orders.filter(o => o.status === 'pending' && !o.vehicle_id && o.delivery_center_id).length
+    count += orders.filter(o => o.status !== 'delivered' && !o.delivery_center_id).length
+    centers.forEach(c => {
+      const availableVehicles = vehicles.filter(v => String(v.delivery_center_id) === String(c.id) && v.is_available)
+      const pendingOrders = orders.filter(o => String(o.delivery_center_id) === String(c.id) && o.status === 'pending')
+      if (availableVehicles.length === 0 && pendingOrders.length > 0) count++
+    })
+    return count
+  }, [orders, vehicles, centers])
 
   const currentCenter = centers.find(c => String(c.id) === String(selectedCenterId))
 
@@ -101,8 +115,8 @@ export default function Sidebar({ onClose }) {
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-transparent">
       {/* Brand Section */}
-      <div className={`flex items-center justify-between gap-2 border-b border-zinc-200/80 px-4 py-4 dark:border-zinc-800 transition-all duration-300 ${showHubs ? 'blur-[2px] opacity-40 grayscale pointer-events-none' : ''}`}>
-        <div className="flex flex-col">
+      <div className={`flex items-center justify-center lg:justify-between gap-2 border-b border-zinc-200/80 px-4 py-4 dark:border-zinc-800 transition-all duration-300 ${showHubs ? 'blur-[2px] opacity-40 grayscale pointer-events-none' : ''}`}>
+        <div className="flex flex-col hidden lg:flex">
           <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500">
             Last-Mile
           </p>
@@ -110,12 +124,23 @@ export default function Sidebar({ onClose }) {
             Routiqo
           </h1>
         </div>
-        <button
-          onClick={toggleTheme}
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 hover:bg-zinc-200 lg:bg-transparent lg:hover:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 lg:dark:bg-transparent lg:dark:hover:bg-zinc-800 transition-all"
-        >
-          {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setAlertsOpen(true)}
+            className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 hover:bg-zinc-200 lg:bg-transparent lg:hover:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 lg:dark:bg-transparent lg:dark:hover:bg-zinc-800 transition-all"
+          >
+            <Bell className="h-4 w-4" />
+            {alertsCount > 0 && (
+              <span className="absolute top-2 right-2 flex h-2 w-2 items-center justify-center rounded-full bg-red-500 ring-2 ring-white dark:ring-zinc-950"></span>
+            )}
+          </button>
+          <button
+            onClick={toggleTheme}
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 hover:bg-zinc-200 lg:bg-transparent lg:hover:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 lg:dark:bg-transparent lg:dark:hover:bg-zinc-800 transition-all"
+          >
+            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
 
       {/* Navigation */}
@@ -316,6 +341,8 @@ export default function Sidebar({ onClose }) {
           Are you sure you want to delete "{deleteConfirmCenter?.name}"? This will orphan all associated data.
         </p>
       </Modal>
+
+      <AlertsPanel open={alertsOpen} onClose={() => setAlertsOpen(false)} />
     </div>
   )
 }

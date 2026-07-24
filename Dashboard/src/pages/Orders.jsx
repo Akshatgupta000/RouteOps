@@ -51,15 +51,8 @@ export default function Orders() {
   }, [orders, orderFilters])
 
   useEffect(() => {
-    const run = async () => {
-      setPageLoading(true)
-      try {
-        await refreshOrders()
-      } finally {
-        setPageLoading(false)
-      }
-    }
-    run()
+    // Silently refresh in background without blocking the UI
+    refreshOrders()
   }, [refreshOrders])
 
   const columns = [
@@ -79,8 +72,8 @@ export default function Orders() {
           try {
             await api.updateOrder(r.id, { priority: newPriority })
             toast(`Priority set to ${newPriority}`)
-            // We don't necessarily need refreshOrders() here because we updated state locally,
-            // but it's safe to keep it for long-term consistency if desired.
+            refreshOrders()
+            refreshRoutes()
           } catch (err) {
             // Rollback on error
             setOrders(prev => prev.map(o => String(o.id) === String(r.id) ? { ...o, priority: r.priority } : o))
@@ -133,12 +126,13 @@ export default function Orders() {
 
         const handleChange = async (vid) => {
           if (!vid) return
+          setOrders(prev => prev.map(o => String(o.id) === String(r.id) ? { ...o, vehicle_id: vid, status: 'assigned' } : o))
           try {
             await api.updateOrder(r.id, { vehicle_id: vid, status: 'assigned' })
             toast('Vehicle assigned successfully')
-            refreshOrders()
             refreshVehicles()
           } catch (err) {
+            refreshOrders()
             toast('Assignment failed', 'error')
           }
         }
@@ -237,12 +231,15 @@ export default function Orders() {
   ]
 
   const handleAssign = async (id) => {
+    setOrders(prev => prev.map(o => String(o.id) === String(id) ? { ...o, status: 'assigned' } : o))
     try {
-      await api.assignOrder(id)
+      const res = await api.assignOrder(id)
+      const updatedOrder = res.data || res
+      setOrders(prev => prev.map(o => String(o.id) === String(id) ? updatedOrder : o))
       toast('Order assigned successfully')
-      refreshOrders()
       refreshVehicles()
     } catch (err) {
+      refreshOrders()
       const errorData = err?.response?.data?.errors || {}
       
       // Check for structured suggestions
@@ -271,13 +268,14 @@ export default function Orders() {
   }
 
   const handleDeliver = async (id) => {
+    setOrders(prev => prev.map(o => String(o.id) === String(id) ? { ...o, status: 'delivered' } : o))
     try {
       await api.updateOrder(id, { status: 'delivered' })
       toast('Order marked as delivered')
-      refreshOrders()
       refreshRoutes()
       refreshVehicles()
     } catch (err) {
+      refreshOrders()
       toast('Failed to update status', 'error')
     }
   }
@@ -288,12 +286,14 @@ export default function Orders() {
 
   const confirmDelete = async () => {
     if (!deleteConfirmId) return
+    const id = deleteConfirmId
+    setOrders(prev => prev.filter(o => String(o.id) !== String(id)))
+    setDeleteConfirmId(null)
     try {
-      await api.deleteOrder(deleteConfirmId)
+      await api.deleteOrder(id)
       toast('Order deleted')
-      refreshOrders()
-      setDeleteConfirmId(null)
     } catch (err) {
+      refreshOrders()
       toast('Failed to delete order', 'error')
     }
   }
@@ -456,15 +456,16 @@ export default function Orders() {
               disabled={bulkLoading}
               onClick={async () => {
                 setBulkLoading(true)
+                setOrders(prev => prev.map(o => o.status !== 'delivered' ? { ...o, status: 'delivered' } : o))
                 try {
                   const res = await api.markAllOrdersAsDelivered(selectedDate)
                   toast(`Success: ${res.updated_count} orders marked as delivered`)
-                  refreshOrders()
                   refreshRoutes()
                   refreshVehicles()
                   setShowMarkAllConfirm(false)
                 } catch (err) {
-                  toast('Bulk update failed', 'error')
+                  refreshOrders()
+                  toast('Failed to mark all as delivered', 'error')
                 } finally {
                   setBulkLoading(false)
                 }

@@ -495,7 +495,7 @@ export default function MapView({
             
             return (
               <Marker
-                key={`o-${o.id}`}
+                key={`o-${o.id}-${o.priority}`}
                 position={position}
                 icon={orderIcon(color, isPriority)}
                 eventHandlers={{

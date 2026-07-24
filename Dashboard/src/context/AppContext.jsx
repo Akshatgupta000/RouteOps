@@ -628,17 +628,29 @@ export function AppProvider({ children }) {
 
   const resetFleetAction = useCallback(async (centerId = null) => {
     setLoading((l) => ({ ...l, resetFleet: true }))
+
+    // Store previous state for rollback
+    const prevVehicles = vehicles;
+    
+    // Optimistic Update
+    setVehicles(prev => prev.map(v => {
+      if (centerId && String(v.delivery_center_id) !== String(centerId)) return v;
+      return { ...v, is_available: true };
+    }));
+
     try {
       const payload = centerId ? { delivery_center_id: centerId } : {}
       await api.resetFleet(payload)
       await Promise.all([refreshVehicles(), refreshRoutes(), refreshOrders()])
       toast('Fleet status reset to available.')
     } catch {
+      // Rollback
+      setVehicles(prevVehicles)
       toast('Failed to reset fleet.', 'error')
     } finally {
       setLoading((l) => ({ ...l, resetFleet: false }))
     }
-  }, [refreshVehicles, toast])
+  }, [vehicles, refreshVehicles, refreshRoutes, refreshOrders, toast])
 
   const toggleVehicleAvailability = useCallback(async (vehicleId, currentStatus) => {
     const wasSimulating = simulationPhase === 'running' || simulationPhase === 'paused'
@@ -649,6 +661,10 @@ export function AppProvider({ children }) {
     resetFleetSimulation({ silent: true })
 
     setLoading((l) => ({ ...l, updateVehicle: true }))
+
+    // Optimistic update
+    setVehicles(prev => prev.map(v => String(v.id) === String(vehicleId) ? { ...v, is_available: !currentStatus } : v))
+
     try {
       await api.updateVehicle(vehicleId, { is_available: !currentStatus })
       await refreshVehicles()
@@ -665,8 +681,10 @@ export function AppProvider({ children }) {
         }
       }
       
-      toast(`Vehicle marked as ${!currentStatus ? 'busy' : 'available'}.`)
+      toast(`Vehicle marked as ${!currentStatus ? 'available' : 'busy'}.`)
     } catch (e) {
+      // Rollback on error
+      setVehicles(prev => prev.map(v => String(v.id) === String(vehicleId) ? { ...v, is_available: currentStatus } : v))
       toast('Failed to update vehicle status', 'error')
     } finally {
       setLoading((l) => ({ ...l, updateVehicle: false }))

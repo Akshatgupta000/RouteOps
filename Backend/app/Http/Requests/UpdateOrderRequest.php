@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\OrderPriority;
 use App\Enums\OrderStatus;
 use App\Models\Order;
 use App\Models\Vehicle;
@@ -19,6 +20,7 @@ class UpdateOrderRequest extends FormRequest
     {
         return [
             'status' => ['sometimes', 'required', new Enum(OrderStatus::class)],
+            'priority' => ['sometimes', new Enum(OrderPriority::class)],
             'vehicle_id' => ['sometimes', 'nullable', 'string'],
         ];
     }

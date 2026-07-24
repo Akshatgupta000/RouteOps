@@ -313,7 +313,7 @@ export default function Orders() {
   }
 
   return (
-    <div className="flex h-full flex-col overflow-auto p-4 lg:p-8">
+    <div className="flex h-full flex-col overflow-hidden p-4 lg:p-8">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl lg:text-3xl font-black tracking-tight text-zinc-900 dark:text-white">
@@ -412,7 +412,7 @@ export default function Orders() {
         </div>
       </Card>
 
-      <div className={`transition-all duration-300 ${isCleanupOpen ? 'pointer-events-none opacity-40 blur-[2px] grayscale-[0.5]' : ''}`}>
+      <div className={`flex-1 overflow-auto min-h-0 transition-all duration-300 ${isCleanupOpen ? 'pointer-events-none opacity-40 blur-[2px] grayscale-[0.5]' : ''}`}>
         {pageLoading ? (
           <Skeleton className="h-64 w-full" />
         ) : (

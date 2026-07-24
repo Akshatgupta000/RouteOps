@@ -308,7 +308,7 @@ class RouteService
             });
 
             foreach ($responses as $vehicleId => $response) {
-                $geom = [];
+                $geom = null;
                 if ($response instanceof \Illuminate\Http\Client\Response && $response->successful()) {
                     $data = $response->json();
                     if (($data['code'] ?? '') === 'Ok' && !empty($data['routes'][0]['geometry']['coordinates'])) {
@@ -332,7 +332,7 @@ class RouteService
                     $departureAt,
                     OptimizationProfile::ShortestDistance,
                     $data['batchId'],
-                    $geometries[$vehicleId] ?? []
+                    $geometries[$vehicleId] ?? null
                 );
 
                 $comparisons[] = [

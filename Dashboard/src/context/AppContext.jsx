@@ -49,7 +49,8 @@ function normalizeRouteForSimulation(route) {
   if (!route) return null
 
   const routeStatus = route.status ?? 'planned'
-  const sortedStops = [...(route.stops ?? [])].sort(
+  const rawStops = route.stops || route.route_stops || route.routeStops || []
+  const sortedStops = [...rawStops].sort(
     (a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0)
   )
   const currentSequence = Number(route.next_stop_sequence ?? 1)
@@ -439,12 +440,22 @@ export function AppProvider({ children }) {
   }, [resetFleetSimulation])
 
   const generateRoutesAction = useCallback(async (overrideCenterId = null) => {
-    // Immediately clear state for instant visual feedback
-    resetFleetSimulation({ silent: true })
-    setActiveMultiRoutes([])
-    setActiveRouteBase(null)
-
     const centerToUse = overrideCenterId || selectedCenterId
+    const wasSimulating = simulationPhase === 'running' || simulationPhase === 'paused'
+
+    // Preserve non-planned routes (in_progress, completed) so they don't disappear from the map
+    const preservedRoutes = activeMultiRoutes.filter(r => 
+      (String(r.delivery_center_id) === String(centerToUse) || String(r.delivery_center?.id) === String(centerToUse)) 
+        ? r.status !== 'planned' 
+        : true
+    )
+    
+    // We update active routes but do NOT clear the simulation state immediately so it doesn't flicker/stop abruptly
+    setActiveMultiRoutes(preservedRoutes)
+    if (activeRouteBase && activeRouteBase.status === 'planned') {
+      setActiveRouteBase(preservedRoutes.length > 0 ? preservedRoutes[0] : null)
+    }
+
     const payload = {
       ...(centerToUse != null ? { delivery_center_id: centerToUse } : {}),
       date: selectedDate,
@@ -462,39 +473,60 @@ export function AppProvider({ children }) {
       setComparisons(comps)
       
       if (!comps.length) {
-        setActiveMultiRoutes([])
-        setActiveRouteBase(null)
+        setActiveMultiRoutes(preservedRoutes)
+        if (!activeRouteBase || activeRouteBase.status === 'planned') {
+          setActiveRouteBase(preservedRoutes.length > 0 ? preservedRoutes[0] : null)
+        }
+        
+        if (wasSimulating) {
+           setTimeout(() => startFleetSimulation(preservedRoutes), 100)
+        } else {
+           resetFleetSimulation({ silent: true })
+        }
+        
         toast('No pending orders in this hub\'s zone.', 'info')
-        return
+        return preservedRoutes
       }
       const allPrimaryRoutes = comps.map(c => c.shortest_distance_route)
+      const normalizedNewRoutes = allPrimaryRoutes.map((r) => normalizeRouteForSimulation(stripMeta(r)))
       
-      setActiveMultiRoutes(
-        allPrimaryRoutes.map((r) => normalizeRouteForSimulation(stripMeta(r)))
-      )
-      if (allPrimaryRoutes.length > 0) {
-        setActiveRouteBase(normalizeRouteForSimulation(stripMeta(allPrimaryRoutes[0])))
-      }
+      const finalRoutes = [...preservedRoutes, ...normalizedNewRoutes]
       
-      // Keep first one as the main active route for backwards compatibility / simulation
-      if (allPrimaryRoutes.length > 0) {
-        setActiveRouteBase(normalizeRouteForSimulation(stripMeta(allPrimaryRoutes[0])))
+      setActiveMultiRoutes(finalRoutes)
+      
+      if (!activeRouteBase || activeRouteBase.status === 'planned') {
+        if (finalRoutes.length > 0) {
+          setActiveRouteBase(finalRoutes[0])
+        }
       }
       
       await Promise.all([refreshOrders(), refreshRoutes()])
-      resetFleetSimulation({ silent: true })
+      
+      // If simulation was running, restart it with the new set of routes
+      if (wasSimulating) {
+         setTimeout(() => startFleetSimulation(finalRoutes), 100)
+      } else {
+         resetFleetSimulation({ silent: true })
+      }
 
-      return allPrimaryRoutes.map((r) => normalizeRouteForSimulation(stripMeta(r)))
+      return finalRoutes
     } catch (e) {
       const msg =
         e?.response?.data?.errors?.delivery_center_id?.[0] ||
         e?.response?.data?.message ||
         e.message ||
         'Generation failed'
-      // On error, clear active routes to prevent showing stale/invalid data
-      setActiveMultiRoutes([])
-      setActiveRouteBase(null)
-      resetFleetSimulation({ silent: true })
+      // On error, revert to preserved routes
+      setActiveMultiRoutes(preservedRoutes)
+      if (!activeRouteBase || activeRouteBase.status === 'planned') {
+        setActiveRouteBase(preservedRoutes.length > 0 ? preservedRoutes[0] : null)
+      }
+      
+      if (wasSimulating) {
+         setTimeout(() => startFleetSimulation(preservedRoutes), 100)
+      } else {
+         resetFleetSimulation({ silent: true })
+      }
       
       toast(msg, 'error')
     } finally {
@@ -648,11 +680,15 @@ export function AppProvider({ children }) {
     playbackPathsRef.current = paths
     setRoutePlaybackCoords(paths)
 
-    const initialSteps = {}
-    keys.forEach((k) => {
-      initialSteps[k] = 0
+    setRoutePlaybackStep(prev => {
+      const next = { ...prev }
+      keys.forEach((k) => {
+        if (next[k] === undefined) {
+          next[k] = 0
+        }
+      })
+      return next
     })
-    setRoutePlaybackStep(initialSteps)
 
     setSimulationPhase('running')
     runPlaybackTimer()
@@ -702,30 +738,16 @@ export function AppProvider({ children }) {
   const toggleVehicleAvailability = useCallback(async (vehicleId, currentStatus) => {
     const wasSimulating = simulationPhase === 'running' || simulationPhase === 'paused'
 
-    // Force instant clear of map and simulation
-    setActiveMultiRoutes([])
-    setActiveRouteBase(null)
-    resetFleetSimulation({ silent: true })
-
     setLoading((l) => ({ ...l, updateVehicle: true }))
 
     // Optimistic update
     setVehicles(prev => prev.map(v => String(v.id) === String(vehicleId) ? { ...v, is_available: !currentStatus } : v))
-
     try {
       await api.updateVehicle(vehicleId, { is_available: !currentStatus })
       await refreshVehicles()
       
-      // If we have a center selected, we MUST regenerate routes to reflect the new fleet capacity
       if (selectedCenterId) {
-        // We use generateRoutesAction which will handle the API call and update activeMultiRoutes
-        const newRoutes = await generateRoutesAction(selectedCenterId)
-        
-        // If we were simulating before, restart it with the new routes
-        if (wasSimulating && newRoutes) {
-          // Small delay to ensure the new routes are rendered on the map before building animation paths
-          setTimeout(() => startFleetSimulation(newRoutes), 100)
-        }
+        await generateRoutesAction(selectedCenterId)
       }
       
       const v = vehicles.find(v => String(v.id) === String(vehicleId));

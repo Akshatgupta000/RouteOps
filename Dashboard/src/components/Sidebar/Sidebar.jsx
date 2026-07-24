@@ -42,6 +42,8 @@ export default function Sidebar({ onClose }) {
     toast,
     resetSelection,
     generateRoutesAction,
+    addActivityLog,
+    activityLogs,
   } = useApp()
 
   const [showHubs, setShowHubs] = useState(false)
@@ -61,6 +63,10 @@ export default function Sidebar({ onClose }) {
     })
     return count
   }, [orders, vehicles, centers])
+
+  const unreadLogsCount = useMemo(() => {
+    return activityLogs ? activityLogs.filter(log => !log.read).length : 0
+  }, [activityLogs])
 
   const currentCenter = centers.find(c => String(c.id) === String(selectedCenterId))
 
@@ -88,6 +94,7 @@ export default function Sidebar({ onClose }) {
     try {
       const response = await api.deleteCenter(deleteConfirmCenter.id)
       toast(response.message || 'Hub deleted and orders reassigned')
+      addActivityLog('Hub Deleted', `Hub "${deleteConfirmCenter.name}" at "${deleteConfirmCenter.address}" was deleted and its orders reassigned.`, 'info')
       resetSelection()
       setVehicles(prev => prev.filter(v => String(v.delivery_center_id) !== String(deleteConfirmCenter.id)))
       setOrders(prev => prev.filter(o => String(o.delivery_center_id) !== String(deleteConfirmCenter.id)))
@@ -130,8 +137,8 @@ export default function Sidebar({ onClose }) {
             className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500 hover:bg-zinc-200 lg:bg-transparent lg:hover:bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700 lg:dark:bg-transparent lg:dark:hover:bg-zinc-800 transition-all"
           >
             <Bell className="h-4 w-4" />
-            {alertsCount > 0 && (
-              <span className="absolute top-2 right-2 flex h-2 w-2 items-center justify-center rounded-full bg-red-500 ring-2 ring-white dark:ring-zinc-950"></span>
+            {(alertsCount > 0 || unreadLogsCount > 0) && (
+              <span className={`absolute top-2 right-2 flex h-2 w-2 items-center justify-center rounded-full ring-2 ring-white dark:ring-zinc-950 ${alertsCount > 0 ? 'bg-red-500' : 'bg-blue-500'}`}></span>
             )}
           </button>
           <button

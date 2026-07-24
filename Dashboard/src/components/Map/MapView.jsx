@@ -233,6 +233,14 @@ export default function MapView({
     [activeMultiRoutes, activeRoute]
   )
 
+  const activeRouteOrderIds = useMemo(() => {
+    const ids = new Set()
+    activeMultiRoutes.forEach(r => {
+      r.stops?.forEach(s => ids.add(String(s.order_id)))
+    })
+    return ids
+  }, [activeMultiRoutes])
+
   useEffect(() => {
     if (displayedRoutes.length === 0) return
     displayedRoutes.forEach((route) => {
@@ -476,10 +484,7 @@ export default function MapView({
         {showOrderPins && orders.filter(o => {
           if (o.status === 'delivered') return false
           // If this order is part of an active route being displayed, hide its generic pin
-          const isInActiveRoute = activeMultiRoutes.some(r => 
-            r.stops?.some(s => String(s.order_id) === String(o.id))
-          )
-          return !isInActiveRoute
+          return !activeRouteOrderIds.has(String(o.id))
         }).map((o) => {
             const position = stopLatLng(o)
             if (position[0] === 0 && position[1] === 0) return null // Skip invalid coords

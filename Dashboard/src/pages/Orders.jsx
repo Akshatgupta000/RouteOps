@@ -28,7 +28,8 @@ export default function Orders() {
     selectedDate, 
     activeMultiRoutes,
     orderFilters,
-    setOrderFilters
+    setOrderFilters,
+    addActivityLog
   } = useApp()
 
   const [pageLoading, setPageLoading] = useState(false)
@@ -72,6 +73,7 @@ export default function Orders() {
           try {
             await api.updateOrder(r.id, { priority: newPriority })
             toast(`Priority set to ${newPriority}`)
+            addActivityLog('Order Priority', `Priority for order at "${r.address}" was changed to ${newPriority}.`, 'info')
             refreshOrders()
             refreshRoutes()
           } catch (err) {
@@ -130,6 +132,9 @@ export default function Orders() {
           try {
             await api.updateOrder(r.id, { vehicle_id: vid, status: 'assigned' })
             toast('Vehicle assigned successfully')
+            const v = vehicles.find(v => String(v.id) === String(vid))
+            const vName = v ? v.name || v.vehicle_number : vid;
+            addActivityLog('Order Assigned', `Order at "${r.address}" was manually assigned to vehicle driver "${vName}".`, 'success')
             refreshVehicles()
           } catch (err) {
             refreshOrders()
@@ -237,6 +242,9 @@ export default function Orders() {
       const updatedOrder = res.data || res
       setOrders(prev => prev.map(o => String(o.id) === String(id) ? updatedOrder : o))
       toast('Order assigned successfully')
+      const targetOrder = orders.find(o => String(o.id) === String(id));
+      const addr = targetOrder ? targetOrder.address : `Order #${formatId(id)}`;
+      addActivityLog('Order Assigned', `Order at "${addr}" was auto-assigned to a vehicle.`, 'success')
       refreshVehicles()
     } catch (err) {
       refreshOrders()
@@ -272,6 +280,9 @@ export default function Orders() {
     try {
       await api.updateOrder(id, { status: 'delivered' })
       toast('Order marked as delivered')
+      const targetOrder = orders.find(o => String(o.id) === String(id));
+      const addr = targetOrder ? targetOrder.address : `Order #${formatId(id)}`;
+      addActivityLog('Order Delivered', `Order at "${addr}" was marked as delivered.`, 'success')
       refreshRoutes()
       refreshVehicles()
     } catch (err) {
@@ -292,6 +303,9 @@ export default function Orders() {
     try {
       await api.deleteOrder(id)
       toast('Order deleted')
+      const targetOrder = orders.find(o => String(o.id) === String(id));
+      const addr = targetOrder ? targetOrder.address : `Order #${formatId(id)}`;
+      addActivityLog('Order Deleted', `Order at "${addr}" was deleted.`, 'info')
     } catch (err) {
       refreshOrders()
       toast('Failed to delete order', 'error')
@@ -460,6 +474,7 @@ export default function Orders() {
                 try {
                   const res = await api.markAllOrdersAsDelivered(selectedDate)
                   toast(`Success: ${res.updated_count} orders marked as delivered`)
+                  addActivityLog('Bulk Delivery Update', `${res.updated_count} orders for ${selectedDate} were marked as delivered.`, 'success')
                   refreshRoutes()
                   refreshVehicles()
                   setShowMarkAllConfirm(false)

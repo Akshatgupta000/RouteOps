@@ -223,9 +223,6 @@ class RouteService
         return $this->centers->all();
     }
 
-    /**
-     * @return array<int, array<string, mixed>>
-     */
     private function processCenter(DeliveryCenter $center, Carbon $departureAt, string $date): array
     {
         $pending = $this->orders->pendingForCenterOnDate($center->id, $date)
@@ -252,9 +249,6 @@ class RouteService
             ]);
         }
 
-        // Removed strict capacity check to allow "last vehicle takes all" logic
-        // $this->assertCapacityCoversOrders($vehicles, $pending);
-
         $clusters = $this->clusterOrdersByVehicleCapacity(
             $pending,
             $vehicles,
@@ -262,48 +256,89 @@ class RouteService
             (float) $center->longitude
         );
 
+        $pendingRoutes = [];
+        foreach ($clusters as $vehicleId => $bucket) {
+            if ($bucket->isEmpty()) {
+                continue;
+            }
+
+            /** @var Vehicle $vehicle */
+            $vehicle = $vehicles->firstWhere('id', $vehicleId);
+            $batchId = (string) Str::uuid();
+
+            $priorityOrders = $bucket->filter(fn($o) => $o->priority === OrderPriority::Priority);
+            $normalOrders = $bucket->filter(fn($o) => $o->priority === OrderPriority::Normal);
+
+            $optimizer = new RouteOptimizer((float) $center->latitude, (float) $center->longitude);
+            
+            $priorityTour = $optimizer->buildShortestDistanceTour($priorityOrders);
+            $normalTour = $optimizer->buildShortestDistanceTour($normalOrders);
+            
+            $finalTour = array_merge($priorityTour, $normalTour);
+
+            $points = collect([[ (float) $center->longitude, (float) $center->latitude ]])
+                ->concat(collect($finalTour)->map(fn($s) => [ (float) $s->longitude, (float) $s->latitude ]))
+                ->push([ (float) $center->longitude, (float) $center->latitude ])
+                ->map(fn($p) => implode(',', $p))
+                ->implode(';');
+
+            $pendingRoutes[$vehicleId] = [
+                'vehicle' => $vehicle,
+                'tour' => $finalTour,
+                'points' => $points,
+                'batchId' => $batchId
+            ];
+        }
+
+        if (empty($pendingRoutes)) {
+            return [];
+        }
+
+        $geometries = [];
+        try {
+            $responses = Http::pool(function (\Illuminate\Http\Client\Pool $pool) use ($pendingRoutes) {
+                $requests = [];
+                foreach ($pendingRoutes as $vehicleId => $data) {
+                    $requests[] = $pool->as((string)$vehicleId)->timeout(5)->get("https://router.project-osrm.org/route/v1/driving/{$data['points']}", [
+                        'overview' => 'full',
+                        'geometries' => 'geojson',
+                    ]);
+                }
+                return $requests;
+            });
+
+            foreach ($responses as $vehicleId => $response) {
+                $geom = [];
+                if ($response instanceof \Illuminate\Http\Client\Response && $response->successful()) {
+                    $data = $response->json();
+                    if (($data['code'] ?? '') === 'Ok' && !empty($data['routes'][0]['geometry']['coordinates'])) {
+                        $geom = array_map(fn($p) => [$p[1], $p[0]], $data['routes'][0]['geometry']['coordinates']);
+                    }
+                }
+                $geometries[$vehicleId] = $geom;
+            }
+        } catch (\Exception $e) {
+            Log::error('route.osrm.pool_failed', ['error' => $e->getMessage()]);
+        }
+
         $comparisons = [];
 
-        DB::transaction(function () use ($clusters, $center, $departureAt, $vehicles, &$comparisons): void {
-            foreach ($clusters as $vehicleId => $bucket) {
-                if ($bucket->isEmpty()) {
-                    continue;
-                }
-
-                /** @var Vehicle $vehicle */
-                $vehicle = $vehicles->firstWhere('id', $vehicleId);
-                
-                // Individual capacity check removed to allow for overloading fallback
-                // if ($bucket->count() > $vehicle->capacity) { ... }
-
-                $batchId = (string) Str::uuid();
-
-                // Split orders by priority to ensure strict 2-level sequencing
-                $priorityOrders = $bucket->filter(fn($o) => $o->priority === OrderPriority::Priority);
-                $normalOrders = $bucket->filter(fn($o) => $o->priority === OrderPriority::Normal);
-
-                $optimizer = new RouteOptimizer((float) $center->latitude, (float) $center->longitude);
-                
-                // Optimize each priority group separately
-                $priorityTour = $optimizer->buildShortestDistanceTour($priorityOrders);
-                $normalTour = $optimizer->buildShortestDistanceTour($normalOrders);
-                
-                // Merge tours: Priority orders ALWAYS come first
-                $finalTour = array_merge($priorityTour, $normalTour);
-
+        DB::transaction(function () use ($pendingRoutes, $geometries, $center, $departureAt, &$comparisons): void {
+            foreach ($pendingRoutes as $vehicleId => $data) {
                 $routeDistance = $this->persistOptimizedRoute(
                     $center,
-                    $vehicle,
-                    $finalTour,
+                    $data['vehicle'],
+                    $data['tour'],
                     $departureAt,
                     OptimizationProfile::ShortestDistance,
-                    $batchId
+                    $data['batchId'],
+                    $geometries[$vehicleId] ?? []
                 );
 
                 $comparisons[] = [
-                    'comparison_batch_id' => $batchId,
+                    'comparison_batch_id' => $data['batchId'],
                     'delivery_center_id' => $center->id,
-                    'vehicle_id' => $vehicle->id,
+                    'vehicle_id' => $vehicleId,
                     'shortest_distance_route' => $routeDistance->fresh(['deliveryCenter', 'vehicle', 'routeStops.order']),
                 ];
 
@@ -324,6 +359,7 @@ class RouteService
         Carbon $departureAt,
         OptimizationProfile $profile,
         string $comparisonBatchId,
+        ?array $geometry = null
     ): DeliveryRoute {
         $optimizer = new RouteOptimizer((float) $center->latitude, (float) $center->longitude);
         $distanceKm = $optimizer->tourDistanceKm($orderedStops);
@@ -337,8 +373,10 @@ class RouteService
             self::SERVICE_SECONDS_PER_STOP,
         );
 
-        // Fetch OSRM geometry
-        $geometry = $this->fetchGeometry($center, $orderedStops);
+        // Fetch OSRM geometry if not provided
+        if ($geometry === null) {
+            $geometry = $this->fetchGeometry($center, $orderedStops);
+        }
 
         $route = $this->routes->create([
             'delivery_center_id' => $center->id,
@@ -439,8 +477,6 @@ class RouteService
             $cursor += $slice->count();
             $buckets[$vehicle->id] = $slice;
         }
-
-        return $buckets;
 
         return $buckets;
     }

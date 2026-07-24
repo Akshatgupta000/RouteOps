@@ -10,7 +10,7 @@ import {
 import * as api from '../services/api'
 import { computeVehiclePosition } from '../utils/routeMap'
 import { buildPlaybackPathForRoute, buildLegPath } from '../utils/simplePlaybackPath'
-import { getLocalDateString } from '../utils/format'
+import { getLocalDateString, formatId } from '../utils/format'
 import { Delaunay } from 'd3-delaunay'
 
 export const AppContext = createContext(null)
@@ -110,6 +110,7 @@ export function AppProvider({ children }) {
   const [toasts, setToasts] = useState([])
   const [bootstrapError, setBootstrapError] = useState(null)
   const [draftDeliveries, setDraftDeliveries] = useState([])
+  const [activityLogs, setActivityLogs] = useState([])
   /** Map animation: idle | running | paused | completed */
   const [simulationPhase, setSimulationPhase] = useState('idle')
   /** Per-vehicle polyline used for simple step animation (see buildPlaybackPathForRoute). */
@@ -141,6 +142,48 @@ export function AppProvider({ children }) {
       /* ignore */
     }
   }, [theme])
+
+  useEffect(() => {
+    // Cleanup logs older than 24 hours every minute
+    const interval = setInterval(() => {
+      setActivityLogs(prev => {
+        if (!prev || prev.length === 0) return prev;
+        const now = Date.now();
+        const twentyFourHours = 24 * 60 * 60 * 1000;
+        const filtered = prev.filter(log => (now - new Date(log.timestamp).getTime()) < twentyFourHours);
+        if (filtered.length !== prev.length) {
+          return filtered;
+        }
+        return prev;
+      });
+    }, 60 * 1000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  const addActivityLog = useCallback((title, message, type = 'info') => {
+    const newLog = {
+      id: Date.now(),
+      title,
+      message,
+      type,
+      timestamp: new Date().toISOString(),
+      read: false
+    }
+    setActivityLogs(prev => [newLog, ...prev])
+  }, [])
+
+  const markLogAsRead = useCallback((id) => {
+    setActivityLogs(prev => prev.map(log => log.id === id ? { ...log, read: true } : log))
+  }, [])
+  
+  const markAllLogsAsRead = useCallback(() => {
+    setActivityLogs(prev => prev.map(log => ({ ...log, read: true })))
+  }, [])
+
+  const clearLogs = useCallback(() => {
+    setActivityLogs([])
+  }, [])
 
   const toast = useCallback((message, type = 'success') => {
     let safeMessage = String(message)
@@ -485,6 +528,7 @@ export function AppProvider({ children }) {
       })
       
       toast(`Delivery center "${newCenter.name}" added. Auto-capturing nearby orders...`)
+      addActivityLog('New Hub', `Hub "${newCenter.name}" was added at "${newCenter.address || 'new location'}".`, 'success')
       
       // Trigger route generation and data sync in background without blocking UI
       generateRoutesAction(newCenter.id).then(() => {
@@ -515,6 +559,7 @@ export function AppProvider({ children }) {
       }
       
       toast(`Order created and geocoded.`)
+      addActivityLog('Order Created', `New order was created for address "${newOrder.address}".`, 'success')
       return newOrder
     } catch (e) {
       const msg = e?.response?.data?.message || e.message || 'Failed to create order'
@@ -535,6 +580,7 @@ export function AppProvider({ children }) {
       setVehicles(prev => [...prev, newVehicle])
       
       toast(`Vehicle ${newVehicle.vehicle_number} added.`)
+      addActivityLog('Vehicle Added', `Vehicle driver "${newVehicle.name}" (${newVehicle.vehicle_number}) was added to the fleet.`, 'success')
       return newVehicle
     } catch (e) {
       const msg = e?.response?.data?.message || e.message || 'Failed to add vehicle'
@@ -643,6 +689,7 @@ export function AppProvider({ children }) {
       await api.resetFleet(payload)
       await Promise.all([refreshVehicles(), refreshRoutes(), refreshOrders()])
       toast('Fleet status reset to available.')
+      addActivityLog('Fleet Reset', 'All vehicles have been reset to available status.', 'info')
     } catch {
       // Rollback
       setVehicles(prevVehicles)
@@ -681,7 +728,11 @@ export function AppProvider({ children }) {
         }
       }
       
+      const v = vehicles.find(v => String(v.id) === String(vehicleId));
+      const vName = v ? v.name : `ID ${vehicleId}`;
+      
       toast(`Vehicle marked as ${!currentStatus ? 'available' : 'busy'}.`)
+      addActivityLog('Vehicle Status', `Vehicle driver "${vName}" was marked as ${!currentStatus ? 'available' : 'busy'}.`, 'info')
     } catch (e) {
       // Rollback on error
       setVehicles(prev => prev.map(v => String(v.id) === String(vehicleId) ? { ...v, is_available: currentStatus } : v))
@@ -807,6 +858,11 @@ export function AppProvider({ children }) {
       toggleVehicleAvailability,
       orderFilters,
       setOrderFilters,
+      activityLogs,
+      addActivityLog,
+      markLogAsRead,
+      markAllLogsAsRead,
+      clearLogs,
     }),
     [
       theme,
@@ -862,6 +918,7 @@ export function AppProvider({ children }) {
       generateVoronoiZonesAction,
       toggleVehicleAvailability,
       orderFilters,
+      activityLogs,
     ]
   )
 

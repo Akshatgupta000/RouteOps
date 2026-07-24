@@ -29,7 +29,7 @@ const Footer = () => {
 
         <div className="pt-12 border-t border-gray-100 flex flex-col md:flex-row justify-between items-center gap-6">
           <p className="text-text-secondary text-sm">
-            © 2026 Routiqo Inc. All rights reserved. Built with ❤️ for logistics teams.
+            © 2026 Routiqo Inc. All rights reserved. Built with ❤️ by Akshat.
           </p>
           <div className="flex items-center gap-8">
             <a href="#" className="text-text-secondary text-sm hover:text-dark">Status</a>

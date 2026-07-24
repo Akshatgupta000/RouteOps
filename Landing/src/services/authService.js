@@ -11,7 +11,9 @@ const authService = {
       });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Login failed with status ${response.status}`);
+        const error = new Error(errorData.message || `Login failed with status ${response.status}`);
+        error.data = errorData;
+        throw error;
       }
       return response.json();
     } catch (err) {
@@ -31,7 +33,9 @@ const authService = {
       });
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Registration failed with status ${response.status}`);
+        const error = new Error(errorData.message || `Registration failed with status ${response.status}`);
+        error.data = errorData;
+        throw error;
       }
       return response.json();
     } catch (err) {

@@ -71,16 +71,7 @@ const Features = () => {
               <p className={`text-sm mb-5 leading-relaxed ${f.dark ? 'text-gray-400' : 'text-text-secondary'}`}>
                 {f.desc}
               </p>
-              <button className={`flex items-center gap-2 font-bold text-xs group/btn ${
-                f.dark ? 'text-primary' : 'text-dark'
-              }`}>
-                Learn more 
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center transition-all group-hover/btn:translate-x-1 ${
-                  f.dark ? 'bg-primary/10' : 'bg-dark/5'
-                }`}>
-                  <ArrowUpRight size={14} />
-                </div>
-              </button>
+
             </motion.div>
           ))}
         </div>

@@ -24,6 +24,8 @@ class AuthController extends Controller
                 'name' => 'required|string|max:255',
                 'email' => 'required|string|email|max:255|unique:mongodb.users,email',
                 'password' => 'required|string|min:8',
+            ], [
+                'email.unique' => 'Account already exists'
             ]);
 
             $user = User::create([
@@ -44,10 +46,12 @@ class AuthController extends Controller
                 'message' => 'Registration successful'
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            $errors = $e->errors();
+            $firstError = !empty($errors) ? current($errors)[0] : 'Validation failed';
             return response()->json([
                 'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $e->errors()
+                'message' => $firstError,
+                'errors' => $errors
             ], 422);
         } catch (\Exception $e) {
             Log::error('Registration error: ' . $e->getMessage());
@@ -87,10 +91,12 @@ class AuthController extends Controller
                 'message' => 'Login successful'
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
+            $errors = $e->errors();
+            $firstError = !empty($errors) ? current($errors)[0] : 'Validation failed';
             return response()->json([
                 'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $e->errors()
+                'message' => $firstError,
+                'errors' => $errors
             ], 422);
         } catch (\Exception $e) {
             Log::error('Login error: ' . $e->getMessage());
